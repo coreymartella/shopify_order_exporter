@@ -139,8 +139,8 @@ class CSVOrderExporter
     end
     def write_order(o)
       tranasctions = Transaction.find(:all, :params => {order_id: o.id, fields: [:kind, :status, :amount, :created_at, :gateway] })
-      total_received = o.transactions.select{|t| %w(capture sale).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
-      total_received -=o.transactions.select{|t| %w(change).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
+      total_received = transactions.select{|t| %w(capture sale).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
+      total_received -= transactions.select{|t| %w(change).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
       row = [
        o.name, #
        o.contact_email, # {:label_name=>"Email"}
