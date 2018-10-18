@@ -104,13 +104,14 @@ class CSVOrderExporter
     date ||= Date.today
     min_time = date.in_time_zone
     max_time = min_time.at_end_of_day
-
-    total = ShopifyAPI::Order.count(params: {created_at_min: min_time.iso8601, created_at_max: max_time.iso8601})
+    params = {created_at_min: min_time.iso8601, created_at_max: max_time.iso8601}
+    params[:since_id] = ENV["SINCE_ID"] if ENV["SINCE_ID"]
+    total = ShopifyAPI::Order.count(params: params)
     processed = 0
     page = 1
     more_records = true
     while more_records
-      orders = ShopifyAPI::Order.all(params: {page: page, created_at_min: min_time.iso8601, created_at_max: max_time.iso8601, limit: page_size})
+      orders = ShopifyAPI::Order.all(params: params.merge(page: page, limit: page_size))
       orders.each_with_index do |o,i|
         write_order(o)
         processed += 1
@@ -154,7 +155,7 @@ class CSVOrderExporter
        transactions.detect{|t| t.kind == "capture" && t.status == "success"}.try(:created_at), # paid_at
        o.fulfillment_status || "unfulfilled", # {:default=>"pending"}
        "", #failure of, #fulfilled_at
-       (o.customer.accepts_marketing ? "yes" : "no"), #failure of, #marketing_preference
+       (o.try(:customer)&.accepts_marketing ? "yes" : "no"), #failure of, #marketing_preference
        o.currency, #
        o.subtotal_price, # {:label_name=>"Subtotal"}
        o.shipping_lines.map(&:price).map(&:to_d).sum, #failure of, #shipping_price
@@ -172,7 +173,7 @@ class CSVOrderExporter
        o.line_items.first&.requires_shipping,
        o.line_items.first&.taxable,
        o.line_items.first&.fulfillment_status,
-       o.billing_address.name.presence || o.customer.name,
+       o.billing_address.name.presence || o.try(:customer)&.name,
        [o.billing_address.address1, o.billing_address.address2].reject(&:blank?).join(", ").presence,
        o.billing_address.address1, # {:label_name=>"Billing Address1"}
        o.billing_address.address2, # {:label_name=>"Billing Address2"}
