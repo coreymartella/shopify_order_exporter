@@ -2,8 +2,6 @@ require 'shopify_api'
 require 'active_support'
 require 'active_support/core_ext'
 require 'csv'
-require 'ruby-prof'
-require 'ruby-prof-flamegraph'
 
 class CSVOrderExporter
   ATTRIBUTES = [
@@ -108,7 +106,7 @@ class CSVOrderExporter
       orders = ShopifyAPI::Order.all(params: {limit: page_size, since_id: @since_id})
       puts "#{Time.now} Fetched #{orders.size} orders in #{Time.now-t}"
       orders.each_with_index do |o,i|
-        printf("\r%5d/%d", i+1, orders.size);STDOUT.flush
+        printf("\r%5d/%d Order: %d", i+1, orders.size, o.id);STDOUT.flush
         write_order(o)
         records += 1
       end
@@ -138,7 +136,9 @@ class CSVOrderExporter
       end.flatten
     end
     def write_order(o)
-      tranasctions = Transaction.find(:all, :params => {order_id: o.id, fields: [:kind, :status, :amount, :created_at, :gateway] })
+      transactions = ShopifyAPI::Transaction.find(:all, :params => {order_id: o.id, fields: [:id, :kind, :status, :amount, :created_at, :gateway, :receipt, :source] })
+      payment_reference_transaction = transactions.select { |t| %w(authorization sale).include?(t.kind) && t.status = "success" }.last
+      payment_reference_receipt = payment_reference_transaction.try(:receipt)
       total_received = transactions.select{|t| %w(capture sale).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
       total_received -= transactions.select{|t| %w(change).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
       row = [
@@ -190,7 +190,7 @@ class CSVOrderExporter
        o.note_attributes.map{ |na| "#{na.name}:, #{na.value}" }.join("\n"),
        (o.cancelled_at ? Time.parse(o.cancelled_at).to_s : nil), # {:label_name=>"Cancelled at"}
        transactions&.first&.gateway, # payment_gateway_for, mismatch of gateway vs provider...
-       transactions.select { |t| %w(authorization sale).include?(t.kind) && t.status = "success" }.last&.receipt&.trnOrderNumber , #failure of, #payment_reference
+       payment_reference_receipt.try(:trnOrderNumber) || payment_reference_receipt.try(:receipt_id) || payment_reference_transaction.try(:authorization) || payment_reference_transaction.id, #failure of, #payment_reference
        (total_refunded = o.transactions.select{|t| t.kind == "refund" && t.status == "success"}.map(&:amount).map(&:to_d).sum), #failure of, #total_refunded
        o.line_items.first.vendor, # {:label_name=>"Vendor"}
        o.id,
