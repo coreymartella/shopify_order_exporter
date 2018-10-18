@@ -97,23 +97,29 @@ class CSVOrderExporter
       raise "TOKEN or API_KEY and PASSWORD must be provided"
     end
 
+    Time.zone = ShopifyAPI::Shop.current.iana_timezone
 
-    @since_id = ENV["SINCE_ID"]
-    records = 0
+    date = (Date.parse(ENV["DATE"]) rescue nil)
+    raise("Unable to parse date, pass DATE=YYYY-MM-DD") if ENV["DATE"].present? && !date
+    date ||= Date.today
+    min_time = date.in_time_zone
+    max_time = min_time.at_end_of_day
+
+    total = ShopifyAPI::Order.count(params: {created_at_min: min_time.iso8601, created_at_max: max_time.iso8601})
+    processed = 0
+    page = 1
     more_records = true
     while more_records
-      t = Time.now
-      orders = ShopifyAPI::Order.all(params: {limit: page_size, since_id: @since_id})
-      puts "#{Time.now} Fetched #{orders.size} orders in #{Time.now-t}"
+      orders = ShopifyAPI::Order.all(params: {page: page, created_at_min: min_time.iso8601, created_at_max: max_time.iso8601, limit: page_size})
       orders.each_with_index do |o,i|
-        printf("\r%5d/%d Order: %d", i+1, orders.size, o.id);STDOUT.flush
         write_order(o)
-        records += 1
+        processed += 1
+        per_iteration = (Time.now - start)/processed
+        est = (start + (per_iteration*total))
+        printf("\r%6d/%d (Order %s) ETA: %s (%.2f hours)", processed, total, o.id, est, (est-Time.now)/1.hour);STDOUT.flush
       end
-      puts ""
-      break if records >= 200
-      @since_id = orders.last.id
-      more_records = orders.size == 250
+      break if ENV["MAX_RECORDS"] && ENV["MAX_RECORDS"] <= records
+      page += 1
     end
     csv.close
     puts "#{Time.now} Wrote #{records} in #{Time.now-start}"
@@ -229,19 +235,4 @@ class CSVOrderExporter
     end
 end
 
-
-# Profile the code
-if ENV["PROFILE"]
-  require 'ruby-prof'
-  require 'ruby-prof-flamegraph'
-
-  result = RubyProf.profile do
-    CSVOrderExporter.new.perform
-  end
-
-  # Print a graph profile to text
-  printer = RubyProf::FlameGraphPrinter.new(result)
-  File.open("profile_#{Time.now}.flame", 'w') { |file| printer.print(file) }
-else
-  CSVOrderExporter.new.perform
-end
+CSVOrderExporter.new.perform
