@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 
-#invoke this script with ENV vars like so:
-#  `SHOP=myshop API_KEY=private_app_api_key PASSWORD=private_app_password [DATE=YYYY-MM-DD] ruby export_orders.rb
+# invoke this script with ENV vars:
+# SHOP=myshop API_KEY=private_app_api_key PASSWORD=private_app_password [DATE=YYYY-MM-DD] ruby export_orders.rb
 
 require 'shopify_api'
 require 'active_support'
