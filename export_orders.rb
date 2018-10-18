@@ -4,109 +4,12 @@ require 'active_support/core_ext'
 require 'csv'
 
 class CSVOrderExporter
-  ATTRIBUTES = [
-    [:name],
-    [:contact_email, { label_name: 'Email' }],
-    [:financial_status],
-    [:paid_at, { label_name: 'Paid at' }],
-    [:fulfillment_status, { default: 'pending' }],
-    [:fulfilled_at, { label_name: 'Fulfilled at' }],
-    [:marketing_preference, { label_name: 'Acce pts Marketing' }],
-    [:currency],
-    [:subtotal_price, { label_name: 'Subtotal' }],
-    [:shipping_price, { label_name: 'Shipping' }],
-    [:total_tax, { label_name: 'Taxes' }],
-    [:total_price, { label_name: 'Total' }],
-    [:discount_code],
-    [:total_discounts, { label_name: 'Discount Amount' }],
-    [:shipping_title, { label_name: 'Shipping Method' }],
-    [:created_at, { label_name: 'Created at' }],
-    # line items
-    ['line_item_quantity', { label_name: 'Lineitem quantity' }],
-    ['line_item_name', { label_name: 'Lineitem name' }],
-    ['line_item_price', { label_name: 'Lineitem price' }],
-    ['line_item_compare_at_price', { label_name: 'Lineitem compare at price' }],
-    ['line_item_sku', { label_name: 'Lineitem sku' }],
-    ['line_item_requires_shipping', { label_name: 'Lineitem requires shipping' }],
-    ['line_item_taxable', { label_name: 'Lineitem taxable' }],
-    ['line_item_fulfillment_status', { label_name: "Lineitem fulfillment status" }],
-    # billing address
-    [:billing_or_customer_name, { label_name: 'Billing Name' }],
-    ['billing_address.street', { label_name: 'Billing Street' }],
-    ['billing_address.address1', { label_name: 'Billing Address1' }],
-    ['billing_address.address2', { label_name: 'Billing Address2' }],
-    ['billing_address.company', { label_name: 'Billing Company' }],
-    ['billing_address.city', { label_name: 'Billing City' }],
-    ['billing_address.zip', { label_name: 'Billing Zip', force_string_in_excel: true }],
-    ['billing_address.province_code', { label_name: 'Billing Province' }],
-    ['billing_address.country_code', { label_name: 'Billing Country' }],
-    ['billing_address.phone', { label_name: 'Billing Phone' }],
-    # shipping address
-    ['shipping_address.name', { label_name: 'Shipping Name' }],
-    ['shipping_address.street', { label_name: 'Shipping Street' }],
-    ['shipping_address.address1', { label_name: 'Shipping Address1' }],
-    ['shipping_address.address2', { label_name: 'Shipping Address2' }],
-    ['shipping_address.company', { label_name: 'Shipping Company' }],
-    ['shipping_address.city', { label_name: 'Shipping City' }],
-    ['shipping_address.zip', { label_name: 'Shipping Zip', force_string_in_excel: true }],
-    ['shipping_address.province_code', { label_name: 'Shipping Province' }],
-    ['shipping_address.country_code', { label_name: 'Shipping Country' }],
-    ['shipping_address.phone', { label_name: 'Shipping Phone' }],
-    [:note, { label_name: 'Notes' }],
-    [:extract_note_attributes, { label_name: 'Note Attributes' }],
-    [:cancelled_at, { label_name: 'Cancelled at' }],
-    [:payment_gateway_for, { label_name: 'Payment Method' }],
-    [:payment_reference, { label_name: 'Payment Reference' }],
-    [:total_refunded, { label_name: 'Refunded Amount' }],
-    # lineitem - vendor
-    ['line_items.first.vendor', { label_name: 'Vendor' }],
-    [:id],
-    [:tags],
-    [:risk_level_for, { label_name: 'Risk Level' }],
-    [:serialized_source_name, { label_name: 'Source' }],
-    # line item discount
-    ['line_items.first.total_discount', { label_name: 'Lineitem discount' }],
-    # tax types GST/PST etc...
-    [:tax_line_details, { calculated_labels: :tax_line_fields }],
-    # Additional columns are added to the end to prevent breaking CSV readers that don't rely on column names.
-    [:phone]
-  ]
-  LINE_ITEM_FIELDS = {
-    quantity: "Lineitem quantity",
-    name: "Lineitem name",
-    price: "Lineitem price",
-    compare_at_price: "Lineitem compare at price",
-    sku: "Lineitem sku",
-    requires_shipping: "Lineitem requires shipping",
-    taxable: "Lineitem taxable",
-    fulfillment_status: "Lineitem fulfillment status",
-    vendor: "Vendor",
-    total_discount: "Lineitem discount"
-  }
+  attr_accessor :date
+
   def perform
-    raise "SHOP must be specified" unless ENV["SHOP"]
-    start = Time.now
-    page_size = ENV["PAGE_SIZE"].to_i
-    page_size = 250 if page_size < 1 || page_size > 250
-    if ENV["TOKEN"]
-      session = ShopifyAPI::Session.new("#{ENV["SHOP"]}.myshopify.com", ENV["TOKEN"])
-      ShopifyAPI::Base.activate_session(session)
-    elsif ENV["API_KEY"] && ENV["PASSWORD"]
-      ShopifyAPI::Base.site = "https://#{ENV["API_KEY"]}:#{ENV["PASSWORD"]}@#{ENV["SHOP"]}.myshopify.com/admin"
-    else
-      raise "TOKEN or API_KEY and PASSWORD must be provided"
-    end
-
-    Time.zone = ShopifyAPI::Shop.current.iana_timezone
-
-    date = (Date.parse(ENV["DATE"]) rescue nil)
-    raise("Unable to parse date, pass DATE=YYYY-MM-DD") if ENV["DATE"].present? && !date
-    date ||= Date.today
-    min_time = date.in_time_zone
-    max_time = min_time.at_end_of_day
-    params = {created_at_min: min_time.iso8601, created_at_max: max_time.iso8601}
-    params[:since_id] = ENV["SINCE_ID"] if ENV["SINCE_ID"]
-    total = ShopifyAPI::Order.count(params: params)
+    connect
+    total = [ShopifyAPI::Order.count(params: params), max_records].compact.min
+    puts "Exporting #{total} orders on #{date} for #{ENV["SHOP"]}"
     processed = 0
     page = 1
     more_records = true
@@ -115,23 +18,65 @@ class CSVOrderExporter
       orders.each_with_index do |o,i|
         write_order(o)
         processed += 1
-        per_iteration = (Time.now - start)/processed
-        est = (start + (per_iteration*total))
-        printf("\r%6d/%d (Order %s) ETA: %s (%.2f hours)", processed, total, o.id, est, (est-Time.now)/1.hour);STDOUT.flush
+        per_iteration = (Time.now - start_time)/processed
+        est = (start_time + (per_iteration*total))
+        printf("\r%6d/%d (Order %14s) ETA: %-20s (%.2f hours)", processed, total, o.id, est, (est-Time.now)/1.hour);STDOUT.flush
+        break if max_records && max_records  <= processed
       end
-      break if ENV["MAX_RECORDS"] && ENV["MAX_RECORDS"] <= records
+      break if max_records && max_records  <= processed
       page += 1
+      more_records = orders.size == page_size
     end
     csv.close
-    puts "#{Time.now} Wrote #{records} in #{Time.now-start}"
+    puts "#{Time.now} Wrote #{processed} in #{Time.now-start_time} to #{filename}"
+  end
+  def date
+    @date ||= begin
+      d = (Date.parse(ENV["DATE"]) rescue nil)
+      raise("Unable to parse date, pass DATE=YYYY-MM-DD") if ENV["DATE"].present? && !@date
+      d ||= Date.today
+    end
+  end
+  def params
+    #TODO is created_at_max <= or < ? do we need a +1 on it?
+    {created_at_min: date.in_time_zone.iso8601, created_at_max: date.at_end_of_day.iso8601}
   end
   protected
+    def start_time
+      @start_time ||= Time.now
+    end
+    def max_records
+      ENV["MAX_RECORDS"].presence&.to_i
+    end
+    def connect
+      raise "SHOP must be specified" unless ENV["SHOP"]
+      start = Time.now
+      if ENV["TOKEN"]
+        session = ShopifyAPI::Session.new("#{ENV["SHOP"]}.myshopify.com", ENV["TOKEN"])
+        ShopifyAPI::Base.activate_session(session)
+      elsif ENV["API_KEY"] && ENV["PASSWORD"]
+        ShopifyAPI::Base.site = "https://#{ENV["API_KEY"]}:#{ENV["PASSWORD"]}@#{ENV["SHOP"]}.myshopify.com/admin"
+      else
+        raise "TOKEN or API_KEY and PASSWORD must be provided"
+      end
+      shop = ShopifyAPI::Shop.current
+      Time.zone = shop.iana_timezone
+      shop
+    end
+    def filename
+      "#{ENV["SHOP"]}_orders_#{@date}.csv"
+    end
     def csv
       @csv ||= begin
-        csv = CSV.open("#{ENV["SHOP"]}_orders_#{Time.now.strftime("%Y%m%d%H%M%S")}.csv", "wb")
+        csv = CSV.open(filename, "wb")
         csv << headers
         csv
       end
+    end
+    def page_size
+      page_size = ENV["PAGE_SIZE"].to_i
+      page_size = 250 if page_size < 1 || page_size > 250
+      page_size
     end
     def headers
       @headers ||= ATTRIBUTES.map do |field,extras|
@@ -173,31 +118,31 @@ class CSVOrderExporter
        o.line_items.first&.requires_shipping,
        o.line_items.first&.taxable,
        o.line_items.first&.fulfillment_status,
-       o.billing_address.name.presence || o.try(:customer)&.name,
-       [o.billing_address.address1, o.billing_address.address2].reject(&:blank?).join(", ").presence,
-       o.billing_address.address1, # {:label_name=>"Billing Address1"}
-       o.billing_address.address2, # {:label_name=>"Billing Address2"}
-       o.billing_address.company, # {:label_name=>"Billing Company"}
-       o.billing_address.city, # {:label_name=>"Billing City"}
-       o.billing_address.zip, # {:label_name=>"Billing Zip", :force_string_in_excel=>true}
-       o.billing_address.province_code, # {:label_name=>"Billing Province"}
-       o.billing_address.country_code, # {:label_name=>"Billing Country"}
-       o.billing_address.phone, # {:label_name=>"Billing Phone"}
-       o.shipping_address.name, # {:label_name=>"Shipping Name"}
-       [o.shipping_address.address1, o.shipping_address.address2].reject(&:blank?).join(", ").presence,
-       o.shipping_address.address1, # {:label_name=>"Shipping Address1"}
-       o.shipping_address.address2, # {:label_name=>"Shipping Address2"}
-       o.shipping_address.company, # {:label_name=>"Shipping Company"}
-       o.shipping_address.city, # {:label_name=>"Shipping City"}
-       o.shipping_address.zip, # {:label_name=>"Shipping Zip", :force_string_in_excel=>true}
-       o.shipping_address.province_code, # {:label_name=>"Shipping Province"}
-       o.shipping_address.country_code, # {:label_name=>"Shipping Country"}
-       o.shipping_address.phone, # {:label_name=>"Shipping Phone"}
+       o.try(:billing_address)&.name.presence || o.try(:customer)&.name,
+       [o.try(:billing_address)&.address1, o.try(:billing_address)&.address2].reject(&:blank?).join(", ").presence,
+       o.try(:billing_address)&.address1, # {:label_name=>"Billing Address1"}
+       o.try(:billing_address)&.address2, # {:label_name=>"Billing Address2"}
+       o.try(:billing_address)&.company, # {:label_name=>"Billing Company"}
+       o.try(:billing_address)&.city, # {:label_name=>"Billing City"}
+       o.try(:billing_address)&.zip, # {:label_name=>"Billing Zip", :force_string_in_excel=>true}
+       o.try(:billing_address)&.province_code, # {:label_name=>"Billing Province"}
+       o.try(:billing_address)&.country_code, # {:label_name=>"Billing Country"}
+       o.try(:billing_address)&.phone, # {:label_name=>"Billing Phone"}
+       o.try(:shipping_address)&.name, # {:label_name=>"Shipping Name"}
+       [o.try(:shipping_address)&.address1, o.try(:shipping_address)&.address2].reject(&:blank?).join(", ").presence,
+       o.try(:shipping_address)&.address1, # {:label_name=>"Shipping Address1"}
+       o.try(:shipping_address)&.address2, # {:label_name=>"Shipping Address2"}
+       o.try(:shipping_address)&.company, # {:label_name=>"Shipping Company"}
+       o.try(:shipping_address)&.city, # {:label_name=>"Shipping City"}
+       o.try(:shipping_address)&.zip, # {:label_name=>"Shipping Zip", :force_string_in_excel=>true}
+       o.try(:shipping_address)&.province_code, # {:label_name=>"Shipping Province"}
+       o.try(:shipping_address)&.country_code, # {:label_name=>"Shipping Country"}
+       o.try(:shipping_address)&.phone, # {:label_name=>"Shipping Phone"}
        o.note, # {:label_name=>"Notes"}
        o.note_attributes.map{ |na| "#{na.name}:, #{na.value}" }.join("\n"),
        (o.cancelled_at ? Time.parse(o.cancelled_at).to_s : nil), # {:label_name=>"Cancelled at"}
        transactions&.first&.gateway, # payment_gateway_for, mismatch of gateway vs provider...
-       payment_reference_receipt.try(:trnOrderNumber) || payment_reference_receipt.try(:receipt_id) || payment_reference_transaction.try(:authorization) || payment_reference_transaction.id, #failure of, #payment_reference
+       payment_reference_receipt.try(:trnOrderNumber) || payment_reference_receipt.try(:receipt_id) || payment_reference_transaction.try(:authorization) || payment_reference_transaction&.id, #failure of, #payment_reference
        (total_refunded = o.transactions.select{|t| t.kind == "refund" && t.status == "success"}.map(&:amount).map(&:to_d).sum), #failure of, #total_refunded
        o.line_items.first.vendor, # {:label_name=>"Vendor"}
        o.id,
@@ -234,6 +179,86 @@ class CSVOrderExporter
     def empty_line_item_data
       (@empty_line_item_data ||= Hash[headers.map {|h| [h,nil]}]).dup
     end
+
+    ATTRIBUTES = [
+      [:name],
+      [:contact_email, { label_name: 'Email' }],
+      [:financial_status],
+      [:paid_at, { label_name: 'Paid at' }],
+      [:fulfillment_status, { default: 'pending' }],
+      [:fulfilled_at, { label_name: 'Fulfilled at' }],
+      [:marketing_preference, { label_name: 'Acce pts Marketing' }],
+      [:currency],
+      [:subtotal_price, { label_name: 'Subtotal' }],
+      [:shipping_price, { label_name: 'Shipping' }],
+      [:total_tax, { label_name: 'Taxes' }],
+      [:total_price, { label_name: 'Total' }],
+      [:discount_code],
+      [:total_discounts, { label_name: 'Discount Amount' }],
+      [:shipping_title, { label_name: 'Shipping Method' }],
+      [:created_at, { label_name: 'Created at' }],
+      # line items
+      ['line_item_quantity', { label_name: 'Lineitem quantity' }],
+      ['line_item_name', { label_name: 'Lineitem name' }],
+      ['line_item_price', { label_name: 'Lineitem price' }],
+      ['line_item_compare_at_price', { label_name: 'Lineitem compare at price' }],
+      ['line_item_sku', { label_name: 'Lineitem sku' }],
+      ['line_item_requires_shipping', { label_name: 'Lineitem requires shipping' }],
+      ['line_item_taxable', { label_name: 'Lineitem taxable' }],
+      ['line_item_fulfillment_status', { label_name: "Lineitem fulfillment status" }],
+      # billing address
+      [:billing_or_customer_name, { label_name: 'Billing Name' }],
+      ['billing_address.street', { label_name: 'Billing Street' }],
+      ['billing_address.address1', { label_name: 'Billing Address1' }],
+      ['billing_address.address2', { label_name: 'Billing Address2' }],
+      ['billing_address.company', { label_name: 'Billing Company' }],
+      ['billing_address.city', { label_name: 'Billing City' }],
+      ['billing_address.zip', { label_name: 'Billing Zip', force_string_in_excel: true }],
+      ['billing_address.province_code', { label_name: 'Billing Province' }],
+      ['billing_address.country_code', { label_name: 'Billing Country' }],
+      ['billing_address.phone', { label_name: 'Billing Phone' }],
+      # shipping address
+      ['shipping_address.name', { label_name: 'Shipping Name' }],
+      ['shipping_address.street', { label_name: 'Shipping Street' }],
+      ['shipping_address.address1', { label_name: 'Shipping Address1' }],
+      ['shipping_address.address2', { label_name: 'Shipping Address2' }],
+      ['shipping_address.company', { label_name: 'Shipping Company' }],
+      ['shipping_address.city', { label_name: 'Shipping City' }],
+      ['shipping_address.zip', { label_name: 'Shipping Zip', force_string_in_excel: true }],
+      ['shipping_address.province_code', { label_name: 'Shipping Province' }],
+      ['shipping_address.country_code', { label_name: 'Shipping Country' }],
+      ['shipping_address.phone', { label_name: 'Shipping Phone' }],
+      [:note, { label_name: 'Notes' }],
+      [:extract_note_attributes, { label_name: 'Note Attributes' }],
+      [:cancelled_at, { label_name: 'Cancelled at' }],
+      [:payment_gateway_for, { label_name: 'Payment Method' }],
+      [:payment_reference, { label_name: 'Payment Reference' }],
+      [:total_refunded, { label_name: 'Refunded Amount' }],
+      # lineitem - vendor
+      ['line_items.first.vendor', { label_name: 'Vendor' }],
+      [:id],
+      [:tags],
+      [:risk_level_for, { label_name: 'Risk Level' }],
+      [:serialized_source_name, { label_name: 'Source' }],
+      # line item discount
+      ['line_items.first.total_discount', { label_name: 'Lineitem discount' }],
+      # tax types GST/PST etc...
+      [:tax_line_details, { calculated_labels: :tax_line_fields }],
+      # Additional columns are added to the end to prevent breaking CSV readers that don't rely on column names.
+      [:phone]
+    ]
+    LINE_ITEM_FIELDS = {
+      quantity: "Lineitem quantity",
+      name: "Lineitem name",
+      price: "Lineitem price",
+      compare_at_price: "Lineitem compare at price",
+      sku: "Lineitem sku",
+      requires_shipping: "Lineitem requires shipping",
+      taxable: "Lineitem taxable",
+      fulfillment_status: "Lineitem fulfillment status",
+      vendor: "Vendor",
+      total_discount: "Lineitem discount"
+    }
 end
 
 CSVOrderExporter.new.perform
