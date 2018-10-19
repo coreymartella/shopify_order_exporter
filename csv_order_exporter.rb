@@ -60,7 +60,11 @@ class CSVOrderExporter
 
     def params
       #TODO is created_at_max <= or < ? do we need a +1 on it?
-      date ? {created_at_min: date.in_time_zone.iso8601, created_at_max: date.at_end_of_day.iso8601} : {}
+      @params ||= begin
+        h = {order: "created_at asc", status: "any"}
+        h.merge!(created_at_min: date.in_time_zone.iso8601, created_at_max: date.at_end_of_day.iso8601) if date
+        h
+      end
     end
 
     def seen_ids
