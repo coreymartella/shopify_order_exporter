@@ -144,7 +144,7 @@ class CSVOrderExporter
        o.shipping_lines.map(&:price).map(&:to_d).sum,
        o.total_tax,
        o.total_price,
-       o.discount_applications.map(&:code).compact.first,
+       o.discount_applications{|d| d.try(:code)}.compact.first,
        o.total_discounts,
        o.shipping_lines.first&.title,
        (o.created_at ? Time.parse(o.created_at).to_s : nil),
