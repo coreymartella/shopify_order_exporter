@@ -30,13 +30,15 @@ class CSVOrderExporter
           next
         end
 
+        printf("\rOrder %14s", o.id);STDOUT.flush
+
         write_order(o)
         seen_ids << o.id
 
         processed += 1
         per_iteration = (Time.now - start_time)/processed
         est = (start_time + (per_iteration*total))
-        printf("\r%6d/%d (Order %14s) ETA: %-20s (%.2f hours)", processed+skipped, total, o.id, est, (est-Time.now)/1.hour);STDOUT.flush
+        printf("%6d/%d ETA: %-20s (%.2f hours)", processed+skipped, total, est, (est-Time.now)/1.hour);STDOUT.flush
 
         break if max_records && max_records  <= processed
       end
@@ -62,6 +64,9 @@ class CSVOrderExporter
       #TODO is created_at_max <= or < ? do we need a +1 on it?
       @params ||= begin
         h = {order: "created_at asc", status: "any"}
+        if ENV["PARAMS"] && (JSON.parse(ENV["PARAMS"]) rescue nil)
+          h.merge!(JSON.parse(ENV["PARAMS"]).with_indifferent_access)
+        end
         h.merge!(created_at_min: date.in_time_zone.iso8601, created_at_max: date.at_end_of_day.iso8601) if date
         h
       end
@@ -131,6 +136,7 @@ class CSVOrderExporter
       total_received = transactions.select{|t| %w(capture sale).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
       total_received -= transactions.select{|t| %w(change).include?(t.kind) && t.status == "success"}.map(&:amount).map(&:to_d).sum
       paid_at = transactions.detect{|t| t.kind == "capture" && t.status == "success"}.try(:created_at)
+      billing_address = o.try(:billing_address) || o.try(:customer).try(:default_address)
       row = [
        o.name,
        o.contact_email,
@@ -156,16 +162,16 @@ class CSVOrderExporter
        o.line_items.first&.requires_shipping,
        o.line_items.first&.taxable,
        o.line_items.first&.fulfillment_status,
-       o.try(:billing_address)&.name.presence || o.try(:customer)&.name,
-       [o.try(:billing_address)&.address1, o.try(:billing_address)&.address2].reject(&:blank?).join(", ").presence,
-       o.try(:billing_address)&.address1, # {:label_name=>"Billing Address1"}
-       o.try(:billing_address)&.address2, # {:label_name=>"Billing Address2"}
-       o.try(:billing_address)&.company, # {:label_name=>"Billing Company"}
-       o.try(:billing_address)&.city, # {:label_name=>"Billing City"}
-       o.try(:billing_address)&.zip, # {:label_name=>"Billing Zip", :force_string_in_excel=>true}
-       o.try(:billing_address)&.province_code, # {:label_name=>"Billing Province"}
-       o.try(:billing_address)&.country_code, # {:label_name=>"Billing Country"}
-       o.try(:billing_address)&.phone,
+       billing_address&.name.presence || [o.try(:customer).try(:first_name), o.try(:customer).try(:last_name)].compact.join(" "),
+       [billing_address&.address1, billing_address&.address2].reject(&:blank?).join(", ").presence,
+       billing_address&.address1, # {:label_name=>"Billing Address1"}
+       billing_address&.address2, # {:label_name=>"Billing Address2"}
+       billing_address&.company, # {:label_name=>"Billing Company"}
+       billing_address&.city, # {:label_name=>"Billing City"}
+       billing_address&.zip, # {:label_name=>"Billing Zip", :force_string_in_excel=>true}
+       billing_address&.province_code, # {:label_name=>"Billing Province"}
+       billing_address&.country_code, # {:label_name=>"Billing Country"}
+       billing_address&.phone,
        o.try(:shipping_address)&.name,
        [o.try(:shipping_address)&.address1, o.try(:shipping_address)&.address2].reject(&:blank?).join(", ").presence,
        o.try(:shipping_address)&.address1,
