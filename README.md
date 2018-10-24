@@ -21,8 +21,8 @@ To run the script you will need to provide the following information:
 
 -   `SHOP:` the name of your shop
 
-    -   e.g. If you shop URL is https://myshop.myshopify.com, then your
-        shop name is myshop
+    -   e.g. If your shop URL is https://myshop.myshopify.com, then your
+        shop name is `myshop`
 
 -   `API_KEY:` Private app API key
 
@@ -37,7 +37,7 @@ To run the script you will need to provide the following information:
 
 -   `DATE:` The date the orders were placed `YYYY-MM-DD `format
 
-    -   e.g. 2018-10-17
+    -   e.g. `2018-10-17`
 
 ## Running the script
 
@@ -49,7 +49,7 @@ To run the tool:
 
 2.  Open the command line tool on your computer.
 
-3.  Navigate to the folder in the command line.
+3.  Navigate to the script folder in the command line.
 
 4.  Type in the following command using the variables described above:
 
